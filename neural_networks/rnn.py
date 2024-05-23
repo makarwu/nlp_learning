@@ -16,7 +16,7 @@ print(ix_to_char)
 
 # hyperparameters
 hidden_size = 100 # size of hidden layer neurons
-seq_length = 25 # number of steps to unroll the RNN for
+seq_length = 16 # number of steps to unroll the RNN for
 learning_rate = 1e-1
 
 # model parameters
@@ -181,4 +181,50 @@ def basicGradCheck():
 
 # Uncomment this to run a basic gradient check
 basicGradCheck()
-#TODO: Adagrad
+
+
+# n is the iteration counter; p is the input sequence pointer, at the beginning
+# of each step it points at the sequence in the input that will be used for 
+# training this iteration
+n, p = 0, 0
+
+# Adagrad -> adaptive learning rate
+# Memory variables with Adagrad.
+
+mWxh, mWhh, mWhy = np.zeros_like(Wxh), np.zeros_like(Whh), np.zeros_like(Why)
+mbh, mby = np.zeros_like(bh), np.zeros_like(by)
+smooth_loss = -np.log(1.0/vocab_size)*seq_length
+
+MAX_DATA = 1000000
+while p < MAX_DATA:
+    # Prepare inputs (we're sweeping from left to right in steps seq_length long)
+    if p+seq_length+1 >= len(data) or n == 0:
+        hprev = np.zeros((hidden_size, 1)) # reset RNN memory
+        p = 0 # go from start of data
+    
+    # In each step we unroll the RNN for seq_length cells, and present it with
+    # seq_length inputs and seq_length target outputs to learn.
+    inputs = [char_to_ix[ch] for ch in data[p:p+seq_length]]
+    targets = [char_to_ix[ch] for ch in data[p+1:p+seq_length+1]]
+
+    # Sample from the model now and then
+    if n % 1000 == 0:
+        sample_ix = sample(hprev, inputs[0], 200)
+        txt = ''.join(ix_to_char[ix] for ix in sample_ix)
+        print('----\n %s \n----' % (txt, ))
+    
+    # Forward seq_length characters through the net and fetch gradient
+    loss, dWxh, dWhh, dWhy, dbh, dby, hprev = lossFun(inputs, targets, hprev)
+    smooth_loss = smooth_loss * 0.999 + loss * 0.001
+    if n % 200 == 0: print('iter %d (p=%d), loss: %f' % (n, p, smooth_loss))
+
+    # Perform parameter update with Adagrad
+    for param, dparam, mem in zip([Wxh, Whh, Why, bh, by],
+                            [dWxh, dWhh, dWhy, dbh, dby],
+                            [mWxh, mWhh, mWhy, mbh, mby]): 
+        mem+= dparam * dparam
+        param += -learning_rate * dparam / np.sqrt(mem + 1e-8)
+    
+    p += seq_length
+    n += 1
+
