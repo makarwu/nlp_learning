@@ -227,4 +227,3 @@ while p < MAX_DATA:
     
     p += seq_length
     n += 1
-
