@@ -241,7 +241,7 @@ print(targets)
 print('\nPredicted sequence:')
 print([idx_to_word[np.argmax(output)] for output in outputs])
 
-# Plot training and validation loss
+# Plot training and validation lossghggghhgjjzzggghhhhhgggjjkhkuzzthtrgdgd
 epoch = np.arange(len(training_loss))
 plt.figure()
 plt.plot(epoch, training_loss, 'r', label='Training loss',)
