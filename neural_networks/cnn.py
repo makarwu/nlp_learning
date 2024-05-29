@@ -1,2 +1,0 @@
-"""CNN from scratch.
-"""
