@@ -1,227 +1,134 @@
+from layer import Convolutional, Pooling, FullyConnected, Dense, regularized_cross_entropy, lr_schedule
+from inout import plot_sample, plot_learning_curve, plot_accuracy_curve, plot_histogram
 import numpy as np
+import time
 
-def softmax(x):
-    return np.exp() / np.sum(np.exp(), axis=0)
+class Network:
+    def __init__(self):
+        self.layers = []
 
-def cross_entropy(x):
-    return -np.log(x)
-
-def regularized_cross_entropy(layers, lam, x):
-    loss = cross_entropy(x)
-    for layer in layers:
-        loss += lam * (np.linalg.norm(layer.get_weights()) ** 2)
-
-def leakyReLU(x, alpha=0.001):
-    return x * alpha if x < 0 else x
-
-def leakyReLU_derivative(x, alpha=0.01):
-    return alpha if x < 0 else 1
-
-def lr_schedule(learning_rate, iteration):
-    if iteration == 0:
-        return learning_rate
-    if (iteration >= 0) and (iteration <= 10000):
-        return learning_rate
-    if iteration > 10000:
-        return learning_rate * 0.1
-    if iteration > 30000:
-        return learning_rate * 0.1
-
-class Convolutional: # conv layer using 3x3 filters
+    def add_layer(self, layer):
+        self.layers.append(layer)
     
-    def __init__(self, name, num_filter=16, stride=1, size=3, activation=None):
-        self.name = name
-        self.filters = np.random.randn(num_filter, 3, 3) * 0.1
-        self.stride = stride
-        self.size = size
-        self.activation = activation
-        self.last_input = None
-        self.leakyReLU = np.vectorize(leakyReLU)
-        self.leakReLU_derivative = np.vectorize(leakyReLU_derivative)
+    def build_model(self, dataset_name):
+        if dataset_name is 'mnist':
+            self.add_layer(Convolutional(name='conv1', num_filters=8, stride=2, size=3, activation='relu'))
+            self.add_layer(Convolutional(name='conv2', num_filters=8, stride=2, size=3, activation='relu'))
+            self.add_layer(Dense(name='dense', nodes=8 * 6 * 6, num_classes=10))
+        else:
+            self.add_layer(Convolutional(name='conv1', num_filters=32, stride=1, size=3, activation='relu'))
+            self.add_layer(Convolutional(name='conv2', num_filters=32, stride=1, size=3, activation='relu'))
+            self.add_layer(Pooling(name='pool1', stride=2, size=2))
+            self.add_layer(Convolutional(name='conv3', num_filters=64, stride=1, size=3, activation='relu'))
+            self.add_layer(Convolutional(name='conv4', num_filters=64, stride=1, size=3, activation='relu'))
+            self.add_layer(Pooling(name='pool2', stride=2, size=2))
+            self.add_layer(FullyConnected(name='fullyconnected', nodes1=64 * 5 * 5, nodes2=256, activation='relu'))
+            self.add_layer(Dense(name='dense', nodes=256, num_classes=10))
+           
+    def forward(self, image, plot_feature_maps):  # forward propagate
+        for layer in self.layers:
+            if plot_feature_maps:
+                image = (image * 255)[0, :, :]
+                plot_sample(image, None, None)
+            image = layer.forward(image)
+        return image
     
-    def forward(self, image):
-        self.last_input = image     # keep track of the last input for backward pass
-        input_dimension = image.shape[1]    # input dimension
-        output_dimension = int((input_dimension - self.size) / self.stride) + 1
-        out = np.zeros((self.filters.shape[0], output_dimension, output_dimension)) # create a matrix to hold the values of the convolution
+    def backward(self, gradient, learning_rate):
+        for layer in reversed(self.layers):
+            gradient = layer.backward(gradient, learning_rate)
+    
+    def train(self, dataset, num_epochs, learning_rate, validate, regularization, plot_weights, verbose):
+        history = {'loss': [], 'accuracy': [], 'val_loss': [], 'val_accuracy': []}
+        for epoch in range(1, num_epochs + 1):
+            print('\n--- Epoch {0} ---'.format(epoch))
+            loss, tmp_loss, num_corr = 0, 0, 0
+            initial_time = time.time()
+            for i in range(len(dataset['train_images'])):
+                if i % 100 == 99:
+                    accuracy = (num_corr / (i + 1)) * 100
+                    loss = tmp_loss / (i + 1)
 
-        for f in range(self.filters.shape[0]):  # convolve each filter over the image
-            tmp_y = out_y = 0   # moving first vertically then horizontally
-            while tmp_y + self.size <= input_dimension:
-                tmp_x = out_x = 0
-                while tmp_x + self.size <= input_dimension:
-                    patch = image[:, tmp_y:tmp_y + self.size, tmp_x:tmp_x + self.size]
-                    out[f, out_y, out_x] += np.sum(self.filters[f] * patch)
-                    tmp_x += self.stride
-                    out_x += 1
-                tmp_y += self.stride
-                out_y += 1
-            if self.activation == "relu":
-                self.leakyReLU(out)
-            return out
-    
-    def backward(self, din, learn_rate=0.005):
-        input_dimension = self.last_input.shape[1]  # input dimension
-        if self.activation == "relu":   # back propagate through ReLU
-            self.leakReLU_derivative(din)
+                    history['loss'].append(loss)
+                    history['accuracy'].append(accuracy)
+
+                    if validate:
+                        indices = np.random.permutation(dataset['validation_images'].shape[0])
+                        val_loss, val_accuracy = self.evaluate(
+                            dataset['validation_images'][indices, :],
+                            dataset['validation_labels'][indices],
+                            regularization,
+                            plot_correct=0,
+                            plot_missclassified=0,
+                            plot_feature_maps=0,
+                            verbose=0
+                        )
+                        history['val_loss'].append(val_loss)
+                        history['val_accuracy'].append(val_accuracy)
+
+                        if verbose:
+                            print('[Step %05d]: Loss %02.3f | Accuracy: %02.3f | Time: %02.2f seconds | '
+                                  'Validation Loss %02.3f | Validation Accuracy: %02.3f' %
+                                  (i + 1, loss, accuracy, time.time() - initial_time, val_loss, val_accuracy))
+                    
+                    elif verbose:
+                        print('[Step %05d]: Loss %02.3f | Accuracy: %02.3f | Time: %02.2f seconds' %
+                              (i + 1, loss, accuracy, time.time() - initial_time))
+                    
+                    # restart time
+                    initial_time = time.time()
+                
+                image = dataset['train_images'][i]
+                label = dataset['train_labels'][i]
+
+                tmp_output = self.forward(image, plot_feature_maps=0)
+
+                # compute (regularized) cross-entropy  and update loss
+                tmp_loss += regularized_cross_entropy(self.layers, regularization, tmp_output[label])
+
+                if np.argmax(tmp_output) == label:  # update the accuracy
+                    num_corr += 1
+                
+                gradient = np.zeros(10)             # compute initial gradient
+                gradient[label] = -1 / tmp_output[label] + np.sum(
+                    [2 * regularization * np.sum(np.absolute(layer.get_weights())) for layer in self.layers]
+                )
+                learning_rate = lr_schedule(learning_rate, iteration=i)     # learning rate decay
+                self.backward(gradient, learning_rate)                      # backward propagation
         
-        dout = np.zeros(self.last_input.shape)  # loss gradient of the input to the convolution
-        dfilt = np.zeros(self.filter.shape)     # loss gradient of the filter
-
-        for f in range(self.filter.shape[0]):   # loop through all filters
-            tmp_y = out_y = 0
-            while tmp_y + self.size <= input_dimension:
-                tmp_x = out_x = 0
-                while tmp_x + self.size <= input_dimension:
-                    patch = self.last_input[:, tmp_y:tmp_y + self.size, tmp_x:tmp_x + self.size]
-                    dfilt[f] += np.sum(din[f, out_y, out_x] * patch, axis=0)
-                    dout[:, tmp_y:tmp_y + self.size, tmp_x:tmp_x + self.size] += din[f, out_y, out_x] * self.filters[f]
-                    tmp_x += self.stride
-                    out_x += 1
-                tmp_y += self.stride
-                out_y += 1
-        self.filters -= learn_rate * dfilt                  # update filters using SGD
-        return dout                                         # return the loss gradient for this layer's inputs
-    
-    def get_weights(self):
-        return np.reshape(self.filters, -1)
-    
-class Pooling:          # max pooling layer using pool size equal to 2
-    def __init__(self, name, stride=2, size=2):
-        self.name = name
-        self.last_input = None
-        self.stride = stride
-        self.size = size
-    
-    def forward(self, image):
-        self.last_input = image
-        num_channels, h_prev, w_prev = image.shape
-        h = int((h_prev - self.size) / self.stride) + 1 # compute output dimensions after the max pooling
-        w = int((w_prev - self.size) / self.stride) + 1
-
-        downsampled = np.zeros((num_channels, h, w)) # hold the values of the max pooling
-        for i in range(num_channels):       # slide the window over every part of the image and 
-                                            # take the maximum value at each step
-            curr_y = out_y = 0
-            while curr_y + self.size <= h_prev:     # slide the max pooling window vertically across the image
-                curr_x = out_x = 0
-                while curr_x + self.size <= w_prev: # slide the max pooling window horizontally across the image
-                    patch = image[i, curr_y,:curr_y + self.size, curr_x:curr_x + self.size]
-                    downsampled[i, out_y, out_x] = np.max(patch) # choose the max value within the window
-                    curr_x += self.stride
-                    out_x += 1
-                curr_y += self.stride
-                out_y += 1
+        if verbose:
+            print('Train Loss: %02.3f' % (history['loss'][-1]))
+            print('Train Accuracy: %02.3f' % (history['accuracy'][-1]))
+            plot_learning_curve(history['loss'])
+            plot_accuracy_curve(history['accuracy'], history['val_accuracy'])
         
-        return downsampled
-
+        if plot_weights:
+            for layer in self.layers:
+                if 'pool' not in layer.name:
+                    plot_histogram(layer.name, layer.get_weights())
     
-    def backward(self, din, learning_rate):
-        num_channels, orig_dim, *_ = self.last_input.shape      # gradients are passed through the indices of greatest
-                                                                # value in the original pooling during the forward step
+    def evaluate(self, X, y, regularization, plot_correct, plot_missclassified, plot_feature_maps, verbose):
+        loss, num_correct = 0, 0
+        for i in range(len(X)):
+            tmp_output = self.forward(X[i], plot_feature_maps)          # forward propagation
 
-        dout = np.zeros(self.last_input.shape)                  # initialize derivative
+            # compute cross-entropy update loss
+            loss += regularized_cross_entropy(self.layers, regularization, tmp_output[y[i]])
+            prediction = np.argmax(tmp_output)
+            if prediction == y[i]:
+                num_correct += 1
+                if plot_correct:
+                    image = (X[i] * 255)[0, :, :]
+                    plot_sample(image, y[i], prediction)
+                    plot_missclassified = 1
+        test_size = len(X)
+        accuracy = (num_correct / test_size) * 100
+        loss = loss / test_size
+        if verbose:
+            print('Test Loss: %02.3f' % loss)
+            print('Test Accuracy: %02.3f' % accuracy)         
+        return loss, accuracy
 
-        for c in range(num_channels):
-            tmp_y = out_y = 0
-            while tmp_y + self.size <= orig_dim:
-                tmp_x = out_x = 0
-                while tmp_x + self.size <= orig_dim:
-                    patch = self.last_input[c, tmp_y:tmp_y + self.size, tmp_x:tmp_x + self.size]    # obtain index of largest
-                    (x, y) = np.unravel_index(np.nanargmax(patch), patch.shape)                     # value in patch
-                    dout[c, tmp_y + x, tmp_x + y] += din[c, out_y, out_x]
-                    tmp_x += self.stride
-                    out_x += 1
-                tmp_y += self.stride
-                out_y += 1
 
-        return dout
-
-    def get_weights(self):                          # pooling layers have no weights
-        return 0
-
-class FullyConnected:           # fully connected layer
-    def __init__(self, name, nodes1, nodes2, activation):
-        self.name = name
-        self.weights = np.random.randn(nodes1, nodes2) * 0.1
-        self.biases = np.zeros(nodes2)
-        self.activation = activation
-        self.last_input_shape = None
-        self.last_input = None
-        self.last_output = None
-        self.leakyReLU = np.vectorize(leakyReLU)
-        self.leakyReLU_derivative = np.vectorize(leakyReLU_derivative)
-
-    def forward(self, input):
-        self.last_input_shape = input.shape     # keep track of last input shape before flattening
-        input = input.flatten()                 # flatten the input
-        output = np.dot(input, self.weights) + self.biases
-
-        if self.activation == "relu":
-            self.leakyReLU(output)
-        self.last_input = input                 # keep track of last input and output for later backward propagation
-        self.last_output = output
-        
-        return output
-    
-    def backward(self, din, learning_rate=0.005):
-        if self.activation == "relu":
-            self.leakyReLU_derivative(din)
-        self.last_input = np.expand_dims(self.last_input, axis=1)
-        din = np.expand_dims(din, axis=1)
-        dw = np.dot(self.last_input, np.transpose(din))     # loss gradient of final dense layer weights
-        db = np.sum(din, axis=1).reshape(self.biases.shape) # loss gradient of final dense layer biases
-
-        self.weights -= learning_rate * dw                  # update weights and biases
-        self.biases -= learning_rate * db
-
-        dout = np.dot(self.weights, din)
-        return dout.reshape(self.last_input_shape)
-
-    def get_weights(self):
-        return np.reshape(self.weights, -1)
-    
-class Dense:          # dense layer with softmax activation
-    def __init__(self, name, nodes, num_classes):
-        self.name = name
-        self.weights = np.random.randn(nodes, num_classes) * 0.1
-        self.biases = np.zeros(num_classes)
-        self.last_input_shape = None
-        self.last_input = None
-        self.last_output = None
-    
-    def forward(self, input):
-
-        self.last_input_shape = input.shape     # keep track of last input shape before flattening for later backprop
-        input = input.flatten()
-        output = np.dot(input, self.weights) + self.biases # forward propagate
-        self.last_input = input
-        self.last_output = output
-
-        return softmax(output)
-
-    def backward(self, din, learning_rate=0.005):
-        for i, gradient in enumerate(din):
-            if gradient == 0:   # the derivative of the loss with respect to the output is nonzero
-                continue        # only for the correct class, so skip of the gradient is zero
-
-            t_exp = np.exp(self.last_output)    # gradient of dout[i] with respect ot output
-            dout_dt = -t_exp[i] * t_exp / (np.sum(t_exp) ** 2)
-            dout_dt[i] = t_exp[i] * (np.sum(t_exp) - t_exp[i]) / (np.sum(t_exp) ** 2)
-
-            dt = gradient * dout_dt     # gradient of loss with respect to output
-            dout = self.weights @ dt    # gradient of loss with respect to input
-
-            # update weights and biases
-            self.weights -= learning_rate * (np.transpose(self.last_input[np.newaxis]) @ dt[np.newaxis])
-            self.biases -= learning_rate * dt
-            
-            return dout.reshape(self.last_input_shape)
-    
-    def get_weights(self):
-        return np.reshape(self.weights, -1)
-
-        
 
 
 
