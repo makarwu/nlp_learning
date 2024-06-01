@@ -2,7 +2,8 @@ import torch
 import torch.nn as nn
 
 # keep in mind: they used a positional encoding in the original paper
-# here: learnable positional embedding is used:
+# here: learnable positional embedding is used.
+
 class Embedding(nn.Module):
     def __init__(self, vocab_size, max_length, embed_dim, droput=0.1):
         super(Embedding, self).__init__()
