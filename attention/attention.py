@@ -17,6 +17,7 @@ or a document.
 
 """
 import torch
+import torch.nn.functional as F
 
 #1: create a sentence embedding
 sentence = 'Life is short, eat dessert first'
@@ -31,7 +32,7 @@ print(sentence_int)
 #3: Now, we have an integer-vector representation and can use an embedding
 # layer to encode the inputs into a real-vector embedding.
 
-torch.manual_seed(42)
+torch.manual_seed(123)
 embed = torch.nn.Embedding(6, 16)
 embedded_sentence = embed(sentence_int).detach()
 
@@ -71,3 +72,57 @@ print("values.shape : ", values.shape)
 
 omega_2 = query_2.matmul(keys.T)
 print(omega_2)
+
+# Compute the normalized attention scores: 
+
+attention_weights_2 = F.softmax(omega_2 / d_k**0.5, dim= 0)
+print(attention_weights_2)
+
+# Finally, the last step is to compute z, which is an attention weighted
+# version of original query input x
+
+context_vector_2 = attention_weights_2.matmul(values)
+
+print(context_vector_2.shape)
+print(context_vector_2)
+
+# Let's implement multi-head Attention
+
+h = 3
+multihead_W_query = torch.nn.Parameter(torch.randn(h, d_q, d))
+multihead_W_key = torch.nn.Parameter(torch.randn(h, d_k, d))
+multihead_W_value = torch.nn.Parameter(torch.randn(h, d_v, d))
+
+# Now, we can compute all the keys and values using torch.bmm() (batch matrix multiplication)
+# But first we need to expand the input size by 3
+stacked_inputs = embedded_sentence.T.repeat(3, 1, 1)
+print(stacked_inputs.shape)
+print('stacked inputs: ', stacked_inputs)
+multihead_keys = torch.bmm(multihead_W_key, stacked_inputs)
+multihead_values = torch.bmm(multihead_W_value, stacked_inputs)
+print("multihead_keys.shape : ", multihead_keys.shape)
+print("multihead_values.shape : ", multihead_values.shape)
+
+# Let's swap the second and third dimensions, resulting in tensors with the
+# same dimensional structure as the original input sequence, embedded_sentence:
+
+multihead_keys = multihead_keys.permute(0, 2, 1)
+multihead_values = multihead_values.permute(0, 2, 1)
+print("after swaping the dimension...")
+print("multihead_keys.shape : ", multihead_keys.shape)
+print("multihead_values.shape : ", multihead_values.shape)
+
+# Let's implement Cross-Attention:
+# the only thing that changes is, that we have a 2nd input sequence 
+# Suppose we have a sentence with 8 tokens:
+
+embedded_sentence_2 = torch.rand(8, 16) # 2nd input sequence
+
+keys = W_key.matmul(embedded_sentence_2.T).T
+values = W_value.matmul(embedded_sentence_2.T).T
+
+print("keys.shape: ", keys.shape)
+print("values.shape: ", values.shape)
+
+
+
